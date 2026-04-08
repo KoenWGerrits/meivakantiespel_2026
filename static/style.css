@@ -537,6 +537,55 @@ body {
   font-size: 0.85rem;
 }
 
+/* ── Dimmed player button (EK already placed) ────────────────────────────── */
+.player-btn-dimmed {
+  opacity: .45;
+}
+.player-btn-dimmed:not(:disabled) {
+  opacity: .6;
+  border-color: var(--yellow) !important;
+}
+.player-btn-dimmed:not(:disabled):hover { opacity: .85; }
+.player-edit-tag {
+  font-size: 0.68rem; background: var(--yellow); color: #111;
+  border-radius: 6px; padding: 1px 5px; margin-left: 4px; vertical-align: middle;
+}
+
+/* ── Race results standings table ─────────────────────────────────────────── */
+.standings-table-wrap { overflow-x: auto; margin-bottom: 16px; }
+
+.standings-table {
+  width: 100%; border-collapse: collapse; font-size: 0.82rem; min-width: 340px;
+}
+.standings-table thead tr { background: var(--surface2); }
+.standings-table th {
+  padding: 9px 10px; text-align: center; font-size: 0.7rem;
+  text-transform: uppercase; letter-spacing: .05em; color: var(--text-dim);
+  border-bottom: 2px solid var(--border); white-space: nowrap;
+}
+.standings-table th.st-horse { text-align: left; }
+.standings-table td {
+  padding: 9px 10px; border-bottom: 1px solid var(--border);
+  text-align: center; vertical-align: middle;
+}
+.standings-table tbody tr:last-child td { border-bottom: none; }
+.standings-table tbody tr:hover { background: var(--surface2); }
+
+.st-rank { width: 32px; color: var(--text-dim); font-size: 0.75rem; }
+.st-horse { text-align: left !important; font-weight: 600; }
+.st-race { }
+.st-total { font-weight: 700; color: var(--accent); }
+.st-empty { color: var(--text-dim); }
+
+.st-pos {
+  display: inline-block; width: 26px; height: 26px; border-radius: 50%;
+  line-height: 26px; font-weight: 700; font-size: 0.78rem;
+}
+.pos-gold   { background: #c9a227; color: #111; }
+.pos-silver { background: #9ea7b3; color: #111; }
+.pos-bronze { background: #a0522d; color: #fff; }
+.pos-other  { background: var(--surface2); color: var(--text-dim); }
+
 /* ── Eindklassement prediction step ──────────────────────────────────────── */
 .ek-standings-bar {
   background: var(--surface2); border-radius: var(--radius-sm);

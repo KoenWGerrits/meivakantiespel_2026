@@ -69,7 +69,7 @@ async function loadNieuweBet() {
 }
 
 function resetBetFlow() {
-  state.bet = { type: null, player: null, horse1: null, horse2: null, amount: null, predictions: null };
+  state.bet = { type: null, player: null, horse1: null, horse2: null, amount: null, predictions: null, editBetId: null };
   betGoToStep('type');
 }
 
@@ -92,8 +92,19 @@ function selectBetType(type) {
   betGoToStep('player');
 }
 
-function renderPlayerList() {
+async function renderPlayerList() {
   const container = document.getElementById('player-list');
+  container.innerHTML = '<p style="color:var(--text-dim);font-size:.85rem">Laden...</p>';
+
+  // For eindklassement: fetch existing EK bets to know who already placed one
+  let ekBetByPlayer = {};  // player_id -> {bet_id, race_id, race_status, amount}
+  if (state.bet.type === 'eindklassement') {
+    try {
+      const bets = await api('/api/eindklassement/bets');
+      bets.forEach(b => { ekBetByPlayer[b.player_id] = b; });
+    } catch {}
+  }
+
   container.innerHTML = '';
   const byFamily = {};
   state.players.forEach(p => {
@@ -113,10 +124,42 @@ function renderPlayerList() {
     byFamily[family].forEach(p => {
       const btn = document.createElement('button');
       btn.className = 'player-btn';
-      btn.textContent = p.name;
-      btn.onclick = () => {
+
+      const ekBet = ekBetByPlayer[p.id];
+      const isEk = state.bet.type === 'eindklassement';
+      const canEdit = isEk && ekBet && ekBet.race_status === 'open';
+      const isLocked = isEk && ekBet && ekBet.race_status !== 'open';
+
+      if (isLocked) {
+        btn.className = 'player-btn player-btn-dimmed';
+        btn.disabled = true;
+        btn.title = 'Bet geplaatst in afgesloten race';
+      } else if (canEdit) {
+        btn.className = 'player-btn player-btn-dimmed';
+        btn.title = 'Voorspelling bewerken';
+      }
+
+      btn.innerHTML = `${p.name}${canEdit ? ' <span class="player-edit-tag">bewerken</span>' : ''}`;
+
+      btn.onclick = async () => {
         state.bet.player = p;
-        betGoToStep(state.bet.type === 'eindklassement' ? 'eindklassement' : 'horses');
+        if (isEk && ekBet) {
+          // Edit mode: pre-load existing predictions and amount
+          try {
+            const preds = await api(`/api/bets/${ekBet.bet_id}/predictions`);
+            state.bet.predictions = preds.map(pr => ({
+              horse_id: pr.horse_id,
+              predicted_position: pr.predicted_position,
+            }));
+          } catch { state.bet.predictions = null; }
+          state.bet.amount = ekBet.amount;
+          state.bet.editBetId = ekBet.bet_id;
+        } else {
+          state.bet.predictions = null;
+          state.bet.amount = null;
+          state.bet.editBetId = null;
+        }
+        betGoToStep(isEk ? 'eindklassement' : 'horses');
       };
       wrap.appendChild(btn);
     });
@@ -244,6 +287,7 @@ function renderAmountStep() {
     const btn = document.createElement('button');
     btn.className = 'amount-btn';
     btn.textContent = `€${v}`;
+    if (state.bet.amount === v) btn.classList.add('selected');
     btn.onclick = () => {
       document.querySelectorAll('.amount-btn').forEach(b => b.classList.remove('selected'));
       btn.classList.add('selected');
@@ -253,7 +297,11 @@ function renderAmountStep() {
     btnContainer.appendChild(btn);
   }
   const input = document.getElementById('amount-input');
-  input.max = cap; input.value = '';
+  input.max = cap;
+  input.value = state.bet.amount && !Number.isInteger(state.bet.amount) ? state.bet.amount : '';
+  if (state.bet.amount && !btnContainer.querySelector('.selected')) {
+    input.value = state.bet.amount;
+  }
   input.oninput = () => {
     document.querySelectorAll('.amount-btn').forEach(b => b.classList.remove('selected'));
     state.bet.amount = parseFloat(input.value) || null;
@@ -263,22 +311,28 @@ function renderAmountStep() {
 async function submitBet() {
   const amount = state.bet.amount || parseFloat(document.getElementById('amount-input').value);
   if (!amount || amount <= 0) { alert('Vul een geldig bedrag in.'); return; }
-  const body = {
-    player_id: state.bet.player.id,
-    bet_type: state.bet.type,
-    horse1_id: state.bet.horse1 ? state.bet.horse1.id : null,
-    horse2_id: state.bet.horse2 ? state.bet.horse2.id : null,
-    amount,
-  };
-  if (state.bet.type === 'eindklassement') {
-    body.predictions = state.bet.predictions;
-  }
   try {
-    await api(`/api/races/${state.activeRace.id}/bets`, 'POST', body);
+    if (state.bet.editBetId) {
+      // Edit mode: update predictions and amount separately
+      await api(`/api/bets/${state.bet.editBetId}/predictions`, 'PUT', {
+        predictions: state.bet.predictions,
+      });
+      await api(`/api/bets/${state.bet.editBetId}`, 'PUT', { amount });
+    } else {
+      const body = {
+        player_id: state.bet.player.id,
+        bet_type: state.bet.type,
+        horse1_id: state.bet.horse1 ? state.bet.horse1.id : null,
+        horse2_id: state.bet.horse2 ? state.bet.horse2.id : null,
+        amount,
+      };
+      if (state.bet.type === 'eindklassement') body.predictions = state.bet.predictions;
+      await api(`/api/races/${state.activeRace.id}/bets`, 'POST', body);
+    }
     const typeLabel = { single: 'Single', double: 'Double', eindklassement: 'Eindklassement' };
     let horsesText;
     if (state.bet.type === 'eindklassement') {
-      horsesText = 'Top-8 voorspelling';
+      horsesText = state.bet.editBetId ? 'Top-8 voorspelling bijgewerkt' : 'Top-8 voorspelling';
     } else {
       horsesText = state.bet.horse1 ? state.bet.horse1.name : '';
       if (state.bet.horse2) horsesText += ` + ${state.bet.horse2.name}`;
@@ -313,74 +367,59 @@ async function loadResultaten() {
 async function renderResultatenHistory() {
   const list = document.getElementById('results-history-list');
   const noFinished = document.getElementById('results-no-finished');
+  list.innerHTML = '<p style="color:var(--text-dim);font-size:.85rem;padding:8px 0">Laden...</p>';
+
+  let data;
+  try { data = await api('/api/results/table'); }
+  catch { list.innerHTML = '<p class="detail-error">Kon stand niet laden.</p>'; return; }
+
+  const { race_ids, horses } = data;
+
+  if (!race_ids || race_ids.length === 0) {
+    list.innerHTML = '';
+    noFinished.classList.remove('hidden');
+    return;
+  }
+  noFinished.classList.add('hidden');
   list.innerHTML = '';
 
-  let races;
-  try { races = await api('/api/races'); } catch { return; }
+  const wrap = document.createElement('div');
+  wrap.className = 'standings-table-wrap';
 
-  const finished = races.filter(r => r.status === 'finished');
-  noFinished.classList.toggle('hidden', finished.length > 0);
+  const table = document.createElement('table');
+  table.className = 'standings-table';
 
-  for (const race of finished) {
-    const card = document.createElement('div');
-    card.className = 'results-history-card';
+  // Header
+  const thead = document.createElement('thead');
+  thead.innerHTML = `<tr>
+    <th class="st-rank">#</th>
+    <th class="st-horse">Paard</th>
+    ${race_ids.map(r => `<th class="st-race">Race ${r}</th>`).join('')}
+    <th class="st-total">Totaal</th>
+  </tr>`;
+  table.appendChild(thead);
 
-    const header = document.createElement('div');
-    header.className = 'results-history-header';
-    header.innerHTML = `
-      <span class="results-history-title">Race ${race.id}</span>
-      <span class="results-history-badge">Afgerond</span>
-      <span class="results-history-chevron" id="rchev-${race.id}">▼</span>
+  // Body
+  const tbody = document.createElement('tbody');
+  horses.forEach((h, idx) => {
+    const tr = document.createElement('tr');
+    const positionCells = race_ids.map(r => {
+      const pos = h.positions[String(r)];
+      if (pos == null) return `<td class="st-race st-empty">—</td>`;
+      const cls = pos === 1 ? 'pos-gold' : pos === 2 ? 'pos-silver' : pos === 3 ? 'pos-bronze' : 'pos-other';
+      return `<td class="st-race"><span class="st-pos ${cls}">${pos}</span></td>`;
+    }).join('');
+    tr.innerHTML = `
+      <td class="st-rank">${idx + 1}</td>
+      <td class="st-horse">${h.horse_name}</td>
+      ${positionCells}
+      <td class="st-total">${h.total_points}</td>
     `;
-    header.onclick = () => toggleRaceHistory(race.id);
-    card.appendChild(header);
-
-    const body = document.createElement('div');
-    body.className = 'results-history-body hidden';
-    body.id = `rhistory-${race.id}`;
-    body.innerHTML = '<p class="detail-loading">Laden...</p>';
-    card.appendChild(body);
-
-    list.appendChild(card);
-  }
-}
-
-async function toggleRaceHistory(raceId) {
-  const body = document.getElementById(`rhistory-${raceId}`);
-  const chev = document.getElementById(`rchev-${raceId}`);
-  const isOpen = !body.classList.contains('hidden');
-
-  document.querySelectorAll('.results-history-body').forEach(b => b.classList.add('hidden'));
-  document.querySelectorAll('.results-history-chevron').forEach(c => c.textContent = '▼');
-
-  if (isOpen) return;
-
-  body.classList.remove('hidden');
-  chev.textContent = '▲';
-
-  if (body.querySelector('.detail-loading')) {
-    try {
-      const data = await api(`/api/races/${raceId}/results`);
-      body.innerHTML = '';
-      if (!data.positions || data.positions.length === 0) {
-        body.innerHTML = '<p class="detail-empty">Geen resultaten gevonden.</p>';
-        return;
-      }
-      const medalLabels = { 1: '🥇', 2: '🥈', 3: '🥉' };
-      data.positions.forEach(p => {
-        const row = document.createElement('div');
-        row.className = 'rhistory-row';
-        const medal = medalLabels[p.position] || `${p.position}e`;
-        row.innerHTML = `
-          <span class="rhistory-pos">${medal}</span>
-          <span class="rhistory-horse">${p.horse_name}</span>
-        `;
-        body.appendChild(row);
-      });
-    } catch (err) {
-      body.innerHTML = `<p class="detail-error">${err.message}</p>`;
-    }
-  }
+    tbody.appendChild(tr);
+  });
+  table.appendChild(tbody);
+  wrap.appendChild(table);
+  list.appendChild(wrap);
 }
 
 function showResultatenForm() {

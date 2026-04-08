@@ -173,6 +173,22 @@ def get_races_overview():
         conn.close()
 
 
+@app.route('/api/eindklassement/bets')
+def get_eindklassement_bets():
+    """Return all eindklassement bets with player_id, race_id, and race status."""
+    conn = get_db()
+    try:
+        rows = conn.execute('''
+            SELECT b.id AS bet_id, b.player_id, b.race_id, b.amount, r.status AS race_status
+            FROM bets b
+            JOIN races r ON b.race_id = r.id
+            WHERE b.bet_type = 'eindklassement'
+        ''').fetchall()
+        return jsonify([dict(r) for r in rows])
+    finally:
+        conn.close()
+
+
 @app.route('/api/eindklassement/standings')
 def get_eindklassement_standings():
     conn = get_db()
@@ -357,6 +373,46 @@ def delete_bet(bet_id):
         conn.close()
 
 
+@app.route('/api/bets/<int:bet_id>/predictions', methods=['PUT'])
+def update_bet_predictions(bet_id):
+    conn = get_db()
+    try:
+        row = conn.execute(
+            '''SELECT b.id, b.bet_type, b.race_id, r.status AS race_status
+               FROM bets b JOIN races r ON b.race_id = r.id WHERE b.id = ?''',
+            (bet_id,)
+        ).fetchone()
+        if not row:
+            return jsonify({'error': 'Bet niet gevonden'}), 404
+        if row['bet_type'] != 'eindklassement':
+            return jsonify({'error': 'Alleen eindklassement bets kunnen worden bijgewerkt'}), 400
+        if row['race_status'] != 'open':
+            return jsonify({'error': 'Kan voorspelling niet bewerken van een afgelopen race'}), 400
+
+        data = request.get_json()
+        predictions = data.get('predictions', [])
+        if len(predictions) != 8:
+            return jsonify({'error': 'Precies 8 paarden zijn vereist'}), 400
+        horse_ids_pred = sorted(int(p['horse_id']) for p in predictions)
+        pos_values = sorted(int(p['predicted_position']) for p in predictions)
+        if horse_ids_pred != list(range(1, 9)):
+            return jsonify({'error': 'Alle 8 paarden (id 1-8) moeten worden opgegeven'}), 400
+        if pos_values != list(range(1, 9)):
+            return jsonify({'error': 'Posities 1-8 moeten elk precies één keer voorkomen'}), 400
+
+        conn.execute('DELETE FROM eindklassement_predictions WHERE bet_id = ?', (bet_id,))
+        for pred in predictions:
+            conn.execute(
+                '''INSERT INTO eindklassement_predictions (bet_id, horse_id, predicted_position)
+                   VALUES (?, ?, ?)''',
+                (bet_id, int(pred['horse_id']), int(pred['predicted_position']))
+            )
+        conn.commit()
+        return jsonify({'updated': True})
+    finally:
+        conn.close()
+
+
 @app.route('/api/bets/<int:bet_id>', methods=['PUT'])
 def update_bet(bet_id):
     conn = get_db()
@@ -466,6 +522,55 @@ def submit_results(race_id):
         payout_records += calculate_eindklassement_payouts()
 
     return jsonify({'race_id': race_id, 'payouts': payout_records}), 201
+
+
+# ── Results table ─────────────────────────────────────────────────────────────
+
+@app.route('/api/results/table')
+def get_results_table():
+    """
+    Returns a standings table for the race results overview.
+    Shape: { race_ids: [1,2,...], horses: [{horse_id, horse_name, total_points, positions}] }
+    positions is a dict {race_id_str: position_or_null}
+    Sorted by total_points descending.
+    """
+    conn = get_db()
+    try:
+        finished = conn.execute(
+            "SELECT id FROM races WHERE status = 'finished' ORDER BY id"
+        ).fetchall()
+        race_ids = [r['id'] for r in finished]
+
+        horses = conn.execute('SELECT id, name FROM horses ORDER BY id').fetchall()
+
+        pos_map = {r: {} for r in race_ids}
+        if race_ids:
+            ph = ','.join('?' * len(race_ids))
+            rows = conn.execute(
+                f'SELECT race_id, horse_id, position FROM race_results WHERE race_id IN ({ph})',
+                race_ids
+            ).fetchall()
+            for row in rows:
+                pos_map[row['race_id']][row['horse_id']] = row['position']
+
+        result = []
+        for h in horses:
+            total = sum(
+                9 - pos_map[r][h['id']]
+                for r in race_ids
+                if h['id'] in pos_map.get(r, {})
+            )
+            result.append({
+                'horse_id': h['id'],
+                'horse_name': h['name'],
+                'total_points': total,
+                'positions': {str(r): pos_map[r].get(h['id']) for r in race_ids},
+            })
+
+        result.sort(key=lambda x: (-x['total_points'], x['horse_id']))
+        return jsonify({'race_ids': race_ids, 'horses': result})
+    finally:
+        conn.close()
 
 
 # ── Balance ───────────────────────────────────────────────────────────────────
