@@ -1,0 +1,247 @@
+<!DOCTYPE html>
+<html lang="nl">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Meivakantiespel 2026 — Paardenwedden</title>
+  <link rel="stylesheet" href="/static/style.css">
+</head>
+<body>
+
+  <!-- ── Home ──────────────────────────────────────────────────────────────── -->
+  <section id="section-home" class="section active">
+    <div class="home-header">
+      <h1>Meivakantiespel 2026</h1>
+      <div id="home-race-info" class="race-badge"></div>
+    </div>
+    <div class="home-grid">
+      <button class="nav-btn btn-primary" onclick="showSection('section-nieuwe-bet')">
+        <span class="btn-icon">🎯</span>
+        <span>Nieuwe Bet</span>
+      </button>
+      <button class="nav-btn btn-secondary" onclick="showSection('section-resultaten')">
+        <span class="btn-icon">🏁</span>
+        <span>Race Resultaten</span>
+      </button>
+      <button class="nav-btn btn-secondary" onclick="showSection('section-bets')">
+        <span class="btn-icon">📋</span>
+        <span>Bets</span>
+      </button>
+      <button class="nav-btn btn-secondary" onclick="showSection('section-balans')">
+        <span class="btn-icon">💰</span>
+        <span>Balans</span>
+      </button>
+      <button class="nav-btn btn-secondary" onclick="showSection('section-overzicht')">
+        <span class="btn-icon">📈</span>
+        <span>Overzicht</span>
+      </button>
+      <button class="nav-btn btn-secondary" onclick="showSection('section-spelers')">
+        <span class="btn-icon">👥</span>
+        <span>Spelers</span>
+      </button>
+      <button class="nav-btn btn-secondary" onclick="showSection('section-odds')">
+        <span class="btn-icon">📊</span>
+        <span>Odds</span>
+      </button>
+    </div>
+  </section>
+
+  <!-- ── Nieuwe Bet ─────────────────────────────────────────────────────────── -->
+  <section id="section-nieuwe-bet" class="section">
+    <div class="section-header">
+      <button class="back-btn" onclick="showSection('section-home')">← Terug</button>
+      <h2>Nieuwe Bet</h2>
+      <div id="bet-race-info" class="race-badge"></div>
+    </div>
+    <div id="bet-step-type" class="step-panel">
+      <h3>Kies bet type</h3>
+      <div class="btn-group-vert">
+        <button class="bet-type-btn" onclick="selectBetType('single')">
+          <strong>Single Bet</strong>
+          <small>Zet in op één paard</small>
+        </button>
+        <button class="bet-type-btn" onclick="selectBetType('double')">
+          <strong>Double Bet</strong>
+          <small>Zet in op twee paarden</small>
+        </button>
+        <button class="bet-type-btn" onclick="selectBetType('eindklassement')">
+          <strong>Eindklassement</strong>
+          <small>Voorspel de top 8 eindstand</small>
+        </button>
+      </div>
+    </div>
+    <div id="bet-step-player" class="step-panel hidden">
+      <h3>Kies speler</h3>
+      <div id="player-list" class="player-grid"></div>
+      <button class="btn-back-step" onclick="betGoToStep('type')">← Terug</button>
+    </div>
+    <div id="bet-step-horses" class="step-panel hidden">
+      <h3 id="horse-step-title">Kies paard</h3>
+      <div id="horse-grid" class="horse-grid"></div>
+      <div id="double-horse2-section" class="hidden">
+        <h3>Kies tweede paard</h3>
+        <div id="horse-grid-2" class="horse-grid"></div>
+      </div>
+      <button class="btn-back-step" onclick="betGoToStep('player')">← Terug</button>
+    </div>
+    <div id="bet-step-eindklassement" class="step-panel hidden">
+      <h3>Voorspel de eindstand (positie 1 = beste)</h3>
+      <div id="ek-standings-info" class="ek-standings-bar hidden"></div>
+      <div id="ek-grid" class="results-grid"></div>
+      <div id="ek-error" class="form-msg err" style="min-height:0"></div>
+      <button class="btn-submit" onclick="submitEindklassementPredictions()">Bevestigen</button>
+      <button class="btn-back-step" onclick="betGoToStep('player')">← Terug</button>
+    </div>
+
+    <div id="bet-step-amount" class="step-panel hidden">
+      <h3>Kies inzet bedrag</h3>
+      <div id="bet-summary-preview" class="bet-preview"></div>
+      <div class="amount-section">
+        <div id="amount-buttons" class="amount-grid"></div>
+        <div class="amount-custom">
+          <input type="number" id="amount-input" min="1" step="1" placeholder="Of typ een bedrag...">
+        </div>
+        <p id="amount-cap-info" class="cap-info"></p>
+      </div>
+      <button class="btn-submit" onclick="submitBet()">Bet Plaatsen</button>
+      <button class="btn-back-step" onclick="betGoToStep('horses')">← Terug</button>
+    </div>
+    <div id="bet-step-success" class="step-panel hidden">
+      <div class="success-box">
+        <div class="success-icon">✓</div>
+        <h3>Bet geplaatst!</h3>
+        <div id="bet-success-detail"></div>
+        <button class="btn-submit" onclick="resetBetFlow()">Nog een bet</button>
+        <button class="btn-secondary-action" onclick="showSection('section-home')">Terug naar home</button>
+      </div>
+    </div>
+  </section>
+
+  <!-- ── Race Resultaten ────────────────────────────────────────────────────── -->
+  <section id="section-resultaten" class="section">
+    <div class="section-header">
+      <button class="back-btn" onclick="showSection('section-home')">← Terug</button>
+      <h2>Race Resultaten</h2>
+    </div>
+
+    <!-- History overview (default view) -->
+    <div id="results-history-view">
+      <div id="results-history-list" class="results-history-list"></div>
+      <div id="results-no-finished" class="hidden">
+        <p class="info-msg">Nog geen race resultaten ingevoerd.</p>
+      </div>
+      <div id="results-enter-btn-wrap">
+        <button id="btn-enter-results" class="btn-submit" onclick="showResultatenForm()">
+          Resultaten Invoeren voor Race <span id="btn-race-nr"></span>
+        </button>
+      </div>
+    </div>
+
+    <!-- Entry form (toggled) -->
+    <div id="results-entry-view" class="hidden">
+      <div class="results-entry-header">
+        <button class="btn-back-step" onclick="showResultatenHistory()">← Terug naar overzicht</button>
+        <div id="results-race-info" class="race-badge"></div>
+      </div>
+      <p class="results-hint">Vul per positie in welk paard er gefinisht is.</p>
+      <div id="results-positions" class="results-grid"></div>
+      <button class="btn-submit" onclick="submitResults()">Resultaten Opslaan</button>
+    </div>
+
+    <!-- Summary after submission -->
+    <div id="results-summary" class="hidden">
+      <h3>Uitslag Race <span id="results-race-nr"></span></h3>
+      <div id="results-payout-list"></div>
+      <button class="btn-submit" onclick="showSection('section-home')">Terug naar home</button>
+    </div>
+  </section>
+
+  <!-- ── Bets ───────────────────────────────────────────────────────────────── -->
+  <section id="section-bets" class="section">
+    <div class="section-header">
+      <button class="back-btn" onclick="showSection('section-home')">← Terug</button>
+      <h2>Bets</h2>
+    </div>
+
+    <div id="bets-race-tabs" class="race-tabs"></div>
+
+    <div id="bets-no-race" class="hidden">
+      <p class="info-msg">Geen races gevonden.</p>
+    </div>
+
+    <div id="bets-content">
+      <div id="bets-status-badge" class="race-badge" style="margin-bottom:12px;display:inline-block"></div>
+      <div id="bets-list" class="bets-list"></div>
+      <div id="bets-actions" class="bets-actions">
+        <button class="btn-danger" onclick="confirmDeleteAllBets()">Alle Bets Verwijderen</button>
+        <button class="btn-danger btn-danger-race" onclick="confirmDeleteRace()">Race Verwijderen</button>
+      </div>
+    </div>
+  </section>
+
+  <!-- ── Balans ─────────────────────────────────────────────────────────────── -->
+  <section id="section-balans" class="section">
+    <div class="section-header">
+      <button class="back-btn" onclick="showSection('section-home')">← Terug</button>
+      <h2>Balans</h2>
+    </div>
+
+    <div class="race-filter-section">
+      <span class="filter-label">Filter:</span>
+      <div id="balans-race-chips" class="race-chips"></div>
+      <button class="filter-clear-btn" onclick="clearBalansFilter()">Alles</button>
+    </div>
+
+    <div id="balans-list" class="balans-grid"></div>
+    <button class="uitbetalen-btn" onclick="confirmUitbetalen()">Uitbetalen</button>
+  </section>
+
+  <!-- ── Overzicht ──────────────────────────────────────────────────────────── -->
+  <section id="section-overzicht" class="section">
+    <div class="section-header">
+      <button class="back-btn" onclick="showSection('section-home')">← Terug</button>
+      <h2>Overzicht</h2>
+    </div>
+    <div id="overzicht-list" class="overzicht-grid"></div>
+  </section>
+
+  <!-- ── Spelers ────────────────────────────────────────────────────────────── -->
+  <section id="section-spelers" class="section">
+    <div class="section-header">
+      <button class="back-btn" onclick="showSection('section-home')">← Terug</button>
+      <h2>Spelers</h2>
+    </div>
+    <div id="spelers-list" class="spelers-grid"></div>
+    <div class="spelers-add-form form-card">
+      <h3 class="form-card-title">Nieuwe Speler</h3>
+      <div class="form-group">
+        <label for="new-player-family">Familie</label>
+        <select id="new-player-family">
+          <option value="">-- Kies familie --</option>
+        </select>
+      </div>
+      <div class="form-group">
+        <label for="new-player-name">Naam</label>
+        <input type="text" id="new-player-name" placeholder="Voornaam speler">
+      </div>
+      <button class="btn-submit" onclick="createPlayer()">Speler Toevoegen</button>
+      <div id="new-player-msg" class="form-msg"></div>
+    </div>
+  </section>
+
+  <!-- ── Odds ───────────────────────────────────────────────────────────────── -->
+  <section id="section-odds" class="section">
+    <div class="section-header">
+      <button class="back-btn" onclick="showSection('section-home')">← Terug</button>
+      <h2>Odds Beheren</h2>
+    </div>
+    <div class="form-card">
+      <div id="odds-list" class="odds-grid"></div>
+      <button class="btn-submit" onclick="saveAllOdds()">Sla Odds Op</button>
+      <div id="odds-msg" class="form-msg"></div>
+    </div>
+  </section>
+
+  <script src="/static/app.js"></script>
+</body>
+</html>
