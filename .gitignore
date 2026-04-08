@@ -28,8 +28,9 @@ Thumbs.db
 *.swp
 *~
 
-# Claude
+# Claude (keep settings.json, ignore local overrides and session data)
 .claude/
+claude.md
 
 # Logs
 *.log
