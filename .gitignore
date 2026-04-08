@@ -30,7 +30,7 @@ Thumbs.db
 
 # Claude (keep settings.json, ignore local overrides and session data)
 .claude/
-claude.md
+CLAUDE.md
 
 # Logs
 *.log
