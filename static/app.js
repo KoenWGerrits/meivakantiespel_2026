@@ -8,6 +8,16 @@ const state = {
   balansSelectedRaces: [],   // empty = all (payout_event logic), filled = filter
 };
 
+// Numpad state for race results entry
+let resultAssignments = {};  // pos (1-8) -> horse_id
+let activeResultPos = 1;
+
+// Numpad state for eindklassement predictions
+let ekAssignments = {};      // pos (1-8) -> horse_id
+let activeEkPos = 1;
+
+const ORDINALS = ['1e', '2e', '3e', '4e', '5e', '6e', '7e', '8e'];
+
 /* ── Section navigation ───────────────────────────────────────────────────── */
 function showSection(id) {
   document.querySelectorAll('.section').forEach(s => s.classList.remove('active'));
@@ -74,30 +84,53 @@ function resetBetFlow() {
 }
 
 function betGoToStep(step) {
-  ['type', 'player', 'horses', 'eindklassement', 'amount', 'success'].forEach(s =>
+  ['type', 'combined', 'success'].forEach(s =>
     document.getElementById(`bet-step-${s}`).classList.add('hidden')
   );
   document.getElementById(`bet-step-${step}`).classList.remove('hidden');
-  if (step === 'player') renderPlayerList();
-  if (step === 'horses') renderHorseStep();
-  if (step === 'eindklassement') renderEindklassementStep();
-  if (step === 'amount') renderAmountStep();
+  if (step === 'combined') renderCombinedStep();
 }
 
 function selectBetType(type) {
   state.bet.type = type;
+  state.bet.player = null;
   state.bet.horse1 = null;
   state.bet.horse2 = null;
   state.bet.predictions = null;
-  betGoToStep('player');
+  state.bet.amount = null;
+  state.bet.editBetId = null;
+  betGoToStep('combined');
 }
 
-async function renderPlayerList() {
-  const container = document.getElementById('player-list');
+/* ── Combined bet step ────────────────────────────────────────────────────── */
+async function renderCombinedStep() {
+  const type = state.bet.type;
+  const isEk = type === 'eindklassement';
+  const isDouble = type === 'double';
+
+  // Show/hide horse vs EK sections
+  document.getElementById('combined-horses-section').classList.toggle('hidden', isEk);
+  document.getElementById('combined-ek-section').classList.toggle('hidden', !isEk);
+
+  if (!isEk) {
+    document.getElementById('combined-horse-title').textContent = isDouble ? 'Kies eerste paard' : 'Kies paard';
+    document.getElementById('combined-horse2-section').classList.toggle('hidden', !isDouble);
+    renderCombinedHorseGrid('combined-horse-grid', 1);
+    if (isDouble) renderCombinedHorseGrid('combined-horse-grid-2', 2);
+  } else {
+    await renderCombinedEkStandings();
+    renderCombinedEkGrid();
+  }
+
+  await renderCombinedPlayerList();
+  renderCombinedAmountSection();
+}
+
+async function renderCombinedPlayerList() {
+  const container = document.getElementById('combined-player-list');
   container.innerHTML = '<p style="color:var(--text-dim);font-size:.85rem">Laden...</p>';
 
-  // For eindklassement: fetch existing EK bets to know who already placed one
-  let ekBetByPlayer = {};  // player_id -> {bet_id, race_id, race_status, amount}
+  let ekBetByPlayer = {};
   if (state.bet.type === 'eindklassement') {
     try {
       const bets = await api('/api/eindklassement/bets');
@@ -123,7 +156,6 @@ async function renderPlayerList() {
     wrap.className = 'family-players';
     byFamily[family].forEach(p => {
       const btn = document.createElement('button');
-      btn.className = 'player-btn';
 
       const ekBet = ekBetByPlayer[p.id];
       const isEk = state.bet.type === 'eindklassement';
@@ -137,14 +169,20 @@ async function renderPlayerList() {
       } else if (canEdit) {
         btn.className = 'player-btn player-btn-dimmed';
         btn.title = 'Voorspelling bewerken';
+      } else {
+        btn.className = 'player-btn';
       }
+
+      if (state.bet.player && state.bet.player.id === p.id) btn.classList.add('selected');
 
       btn.innerHTML = `${p.name}${canEdit ? ' <span class="player-edit-tag">bewerken</span>' : ''}`;
 
       btn.onclick = async () => {
+        document.querySelectorAll('#combined-player-list .player-btn').forEach(b => b.classList.remove('selected'));
+        btn.classList.add('selected');
         state.bet.player = p;
+
         if (isEk && ekBet) {
-          // Edit mode: pre-load existing predictions and amount
           try {
             const preds = await api(`/api/bets/${ekBet.bet_id}/predictions`);
             state.bet.predictions = preds.map(pr => ({
@@ -154,12 +192,12 @@ async function renderPlayerList() {
           } catch { state.bet.predictions = null; }
           state.bet.amount = ekBet.amount;
           state.bet.editBetId = ekBet.bet_id;
+          renderCombinedEkGrid();
+          renderCombinedAmountSection();
         } else {
           state.bet.predictions = null;
-          state.bet.amount = null;
           state.bet.editBetId = null;
         }
-        betGoToStep(isEk ? 'eindklassement' : 'horses');
       };
       wrap.appendChild(btn);
     });
@@ -168,47 +206,33 @@ async function renderPlayerList() {
   }
 }
 
-function renderHorseStep() {
-  const isDouble = state.bet.type === 'double';
-  document.getElementById('horse-step-title').textContent = isDouble ? 'Kies eerste paard' : 'Kies paard';
-  document.getElementById('double-horse2-section').classList.toggle('hidden', !isDouble);
-  renderHorseGrid('horse-grid', 1);
-  if (isDouble) renderHorseGrid('horse-grid-2', 2);
-}
-
-function renderHorseGrid(containerId, slot) {
+function renderCombinedHorseGrid(containerId, slot) {
   const container = document.getElementById(containerId);
   container.innerHTML = '';
   state.horses.forEach(h => {
     const btn = document.createElement('button');
     btn.className = 'horse-btn';
     const other = slot === 1 ? state.bet.horse2 : state.bet.horse1;
+    const current = slot === 1 ? state.bet.horse1 : state.bet.horse2;
     if (other && other.id === h.id) btn.disabled = true;
+    if (current && current.id === h.id) btn.classList.add('selected');
     btn.innerHTML = `${h.name}<span class="odds-tag">odds: ${h.odds}</span>`;
-    btn.onclick = () => selectHorse(h, slot);
+    btn.onclick = () => {
+      if (slot === 1) state.bet.horse1 = h;
+      else state.bet.horse2 = h;
+      renderCombinedHorseGrid('combined-horse-grid', 1);
+      if (state.bet.type === 'double') renderCombinedHorseGrid('combined-horse-grid-2', 2);
+    };
     container.appendChild(btn);
   });
 }
 
-function selectHorse(horse, slot) {
-  if (slot === 1) state.bet.horse1 = horse;
-  else state.bet.horse2 = horse;
-  if (state.bet.type === 'single') { betGoToStep('amount'); return; }
-  if (state.bet.horse1 && state.bet.horse2) betGoToStep('amount');
-  else renderHorseStep();
-}
-
-/* ── Eindklassement prediction step ──────────────────────────────────────── */
-async function renderEindklassementStep() {
-  const errEl = document.getElementById('ek-error');
-  errEl.textContent = '';
-
-  // Show current standings as a hint
-  const bar = document.getElementById('ek-standings-info');
+async function renderCombinedEkStandings() {
+  const bar = document.getElementById('combined-ek-standings-info');
   try {
     const standings = await api('/api/eindklassement/standings');
-    const finishedRaces = standings.filter(s => s.total_points > 0).length > 0;
-    if (finishedRaces) {
+    const hasPoints = standings.some(s => s.total_points > 0);
+    if (hasPoints) {
       bar.innerHTML = '<span class="ek-standings-label">Huidige stand:</span> ' +
         standings.slice(0, 8).map(s =>
           `<span class="ek-standing-chip">${s.rank}. ${s.horse_name} (${s.total_points}pt)</span>`
@@ -218,70 +242,110 @@ async function renderEindklassementStep() {
       bar.classList.add('hidden');
     }
   } catch { bar.classList.add('hidden'); }
+}
 
-  // Build position rows
-  const grid = document.getElementById('ek-grid');
-  grid.innerHTML = '';
-  for (let pos = 1; pos <= 8; pos++) {
-    const row = document.createElement('div');
-    row.className = 'result-row';
-    const posEl = document.createElement('div');
-    posEl.className = 'result-pos';
-    posEl.textContent = pos;
-    const select = document.createElement('select');
-    select.id = `ek-pos-${pos}`;
-    select.innerHTML = '<option value="">-- Kies paard --</option>';
-    state.horses.forEach(h => {
-      const opt = document.createElement('option');
-      opt.value = h.id;
-      opt.textContent = h.name;
-      select.appendChild(opt);
-    });
-    // Re-populate saved predictions if navigating back
-    if (state.bet.predictions) {
-      const saved = state.bet.predictions.find(p => p.predicted_position === pos);
-      if (saved) select.value = saved.horse_id;
+/* ── Numpad: eindklassement predictions ───────────────────────────────────── */
+function renderCombinedEkGrid() {
+  // Pre-populate from existing predictions (edit mode)
+  ekAssignments = {};
+  activeEkPos = 1;
+  if (state.bet.predictions) {
+    state.bet.predictions.forEach(p => { ekAssignments[p.predicted_position] = p.horse_id; });
+    for (let pos = 1; pos <= 8; pos++) {
+      if (!ekAssignments[pos]) { activeEkPos = pos; break; }
     }
-    row.appendChild(posEl);
-    row.appendChild(select);
-    grid.appendChild(row);
+    if (Object.keys(ekAssignments).length === 8) activeEkPos = 1;
   }
+
+  const grid = document.getElementById('combined-ek-grid');
+  grid.innerHTML = '';
+  grid.className = 'numpad-layout';
+
+  const posSection = document.createElement('div');
+  posSection.className = 'numpad-positions';
+  posSection.id = 'ek-pos-rows';
+  for (let pos = 1; pos <= 8; pos++) posSection.appendChild(buildEkPosRow(pos));
+
+  const horsesSection = document.createElement('div');
+  horsesSection.className = 'numpad-horses';
+  horsesSection.id = 'ek-horse-btns';
+  state.horses.forEach(h => horsesSection.appendChild(buildEkHorseBtn(h)));
+
+  grid.appendChild(posSection);
+  grid.appendChild(horsesSection);
 }
 
-function submitEindklassementPredictions() {
-  const errEl = document.getElementById('ek-error');
-  errEl.textContent = '';
-  const predictions = [];
+function buildEkPosRow(pos) {
+  const horseId = ekAssignments[pos];
+  const horse = horseId ? state.horses.find(h => h.id === horseId) : null;
+  const row = document.createElement('div');
+  row.className = 'numpad-pos-row' + (pos === activeEkPos ? ' active' : '') + (horse ? ' filled' : '');
+  row.id = `ek-posrow-${pos}`;
+  row.innerHTML = `
+    <span class="numpad-pos-label">${ORDINALS[pos - 1]}</span>
+    <span class="numpad-pos-horse">${horse ? horse.name : '—'}</span>
+    ${horse ? `<button class="numpad-pos-clear" title="Wissen" onclick="clearEkPos(event,${pos})">×</button>` : ''}
+  `;
+  row.onclick = () => setActiveEkPos(pos);
+  return row;
+}
+
+function buildEkHorseBtn(horse) {
+  const assigned = Object.values(ekAssignments).includes(horse.id);
+  const btn = document.createElement('button');
+  btn.className = 'numpad-horse-btn';
+  btn.id = `ek-horsebtn-${horse.id}`;
+  btn.disabled = assigned;
+  btn.innerHTML = `<span class="numpad-horse-num">${horse.id}</span><span class="numpad-horse-name">${horse.name}</span>`;
+  btn.onclick = () => selectEkHorse(horse.id);
+  return btn;
+}
+
+function setActiveEkPos(pos) {
+  activeEkPos = pos;
+  updateEkNumpadUI();
+}
+
+function clearEkPos(event, pos) {
+  event.stopPropagation();
+  delete ekAssignments[pos];
+  activeEkPos = pos;
+  updateEkNumpadUI();
+}
+
+function selectEkHorse(horseId) {
+  ekAssignments[activeEkPos] = horseId;
+  let next = activeEkPos + 1;
+  while (next <= 8 && ekAssignments[next]) next++;
+  if (next <= 8) activeEkPos = next;
+  updateEkNumpadUI();
+}
+
+function updateEkNumpadUI() {
   for (let pos = 1; pos <= 8; pos++) {
-    const val = document.getElementById(`ek-pos-${pos}`).value;
-    if (!val) { errEl.textContent = `Vul positie ${pos} in.`; return; }
-    predictions.push({ horse_id: parseInt(val), predicted_position: pos });
+    const row = document.getElementById(`ek-posrow-${pos}`);
+    if (!row) continue;
+    const horseId = ekAssignments[pos];
+    const horse = horseId ? state.horses.find(h => h.id === horseId) : null;
+    row.className = 'numpad-pos-row' + (pos === activeEkPos ? ' active' : '') + (horse ? ' filled' : '');
+    row.innerHTML = `
+      <span class="numpad-pos-label">${ORDINALS[pos - 1]}</span>
+      <span class="numpad-pos-horse">${horse ? horse.name : '—'}</span>
+      ${horse ? `<button class="numpad-pos-clear" title="Wissen" onclick="clearEkPos(event,${pos})">×</button>` : ''}
+    `;
+    row.onclick = () => setActiveEkPos(pos);
   }
-  const ids = predictions.map(p => p.horse_id);
-  if (new Set(ids).size !== 8) {
-    errEl.textContent = 'Elk paard mag maar één keer voorkomen.';
-    return;
-  }
-  state.bet.predictions = predictions;
-  betGoToStep('amount');
+  state.horses.forEach(h => {
+    const btn = document.getElementById(`ek-horsebtn-${h.id}`);
+    if (btn) btn.disabled = Object.values(ekAssignments).includes(h.id);
+  });
 }
 
-function renderAmountStep() {
+function renderCombinedAmountSection() {
   const cap = state.activeRace.bet_cap;
-  const typeLabel = { single: 'Single Bet', double: 'Double Bet', eindklassement: 'Eindklassement' };
-  let horsesText;
-  if (state.bet.type === 'eindklassement') {
-    horsesText = 'Top-8 voorspelling (8 paarden)';
-  } else {
-    horsesText = state.bet.horse1 ? state.bet.horse1.name : '';
-    if (state.bet.horse2) horsesText += ` + ${state.bet.horse2.name}`;
-  }
-  document.getElementById('bet-summary-preview').innerHTML =
-    `<strong>${state.bet.player.name}</strong> (${state.bet.player.family_name})<br>` +
-    `${typeLabel[state.bet.type]} · <strong>${horsesText}</strong>`;
-  document.getElementById('amount-cap-info').textContent = `Maximum inzet: €${cap}`;
+  document.getElementById('combined-amount-cap-info').textContent = `Maximum inzet: €${cap}`;
 
-  const btnContainer = document.getElementById('amount-buttons');
+  const btnContainer = document.getElementById('combined-amount-buttons');
   btnContainer.innerHTML = '';
   for (let v = 1; v <= cap; v++) {
     const btn = document.createElement('button');
@@ -289,28 +353,54 @@ function renderAmountStep() {
     btn.textContent = `€${v}`;
     if (state.bet.amount === v) btn.classList.add('selected');
     btn.onclick = () => {
-      document.querySelectorAll('.amount-btn').forEach(b => b.classList.remove('selected'));
+      document.querySelectorAll('#combined-amount-buttons .amount-btn').forEach(b => b.classList.remove('selected'));
       btn.classList.add('selected');
-      document.getElementById('amount-input').value = v;
+      document.getElementById('combined-amount-input').value = v;
       state.bet.amount = v;
     };
     btnContainer.appendChild(btn);
   }
-  const input = document.getElementById('amount-input');
+  const input = document.getElementById('combined-amount-input');
   input.max = cap;
-  input.value = state.bet.amount && !Number.isInteger(state.bet.amount) ? state.bet.amount : '';
+  if (state.bet.amount) {
+    const isInteger = Number.isInteger(state.bet.amount);
+    if (!isInteger) input.value = state.bet.amount;
+  } else {
+    input.value = '';
+  }
   if (state.bet.amount && !btnContainer.querySelector('.selected')) {
     input.value = state.bet.amount;
   }
   input.oninput = () => {
-    document.querySelectorAll('.amount-btn').forEach(b => b.classList.remove('selected'));
+    document.querySelectorAll('#combined-amount-buttons .amount-btn').forEach(b => b.classList.remove('selected'));
     state.bet.amount = parseFloat(input.value) || null;
   };
 }
 
+
 async function submitBet() {
-  const amount = state.bet.amount || parseFloat(document.getElementById('amount-input').value);
+  if (!state.bet.player) { alert('Kies een speler.'); return; }
+
+  const amountInput = document.getElementById('combined-amount-input');
+  const amount = state.bet.amount || parseFloat(amountInput?.value);
   if (!amount || amount <= 0) { alert('Vul een geldig bedrag in.'); return; }
+
+  // For single/double: validate horse selection
+  if (state.bet.type === 'single' && !state.bet.horse1) { alert('Kies een paard.'); return; }
+  if (state.bet.type === 'double' && (!state.bet.horse1 || !state.bet.horse2)) { alert('Kies twee paarden.'); return; }
+
+  // For eindklassement: collect predictions from numpad state
+  if (state.bet.type === 'eindklassement') {
+    const errEl = document.getElementById('combined-ek-error');
+    errEl.textContent = '';
+    for (let pos = 1; pos <= 8; pos++) {
+      if (!ekAssignments[pos]) { errEl.textContent = `Vul positie ${pos} in.`; return; }
+    }
+    state.bet.predictions = Object.entries(ekAssignments).map(([pos, horseId]) => ({
+      horse_id: horseId, predicted_position: parseInt(pos),
+    }));
+  }
+
   try {
     if (state.bet.editBetId) {
       // Edit mode: update predictions and amount separately
@@ -423,6 +513,8 @@ async function renderResultatenHistory() {
 }
 
 function showResultatenForm() {
+  resultAssignments = {};
+  activeResultPos = 1;
   document.getElementById('results-history-view').classList.add('hidden');
   document.getElementById('results-entry-view').classList.remove('hidden');
   document.getElementById('results-summary').classList.add('hidden');
@@ -437,40 +529,100 @@ function showResultatenHistory() {
   document.getElementById('results-summary').classList.add('hidden');
 }
 
+/* ── Numpad: race results ─────────────────────────────────────────────────── */
 function renderResultPositions() {
   const container = document.getElementById('results-positions');
   container.innerHTML = '';
+  container.className = 'numpad-layout';
+
+  const posSection = document.createElement('div');
+  posSection.className = 'numpad-positions';
+  posSection.id = 'result-pos-rows';
+  for (let pos = 1; pos <= 8; pos++) posSection.appendChild(buildResultPosRow(pos));
+
+  const horsesSection = document.createElement('div');
+  horsesSection.className = 'numpad-horses';
+  horsesSection.id = 'result-horse-btns';
+  state.horses.forEach(h => horsesSection.appendChild(buildResultHorseBtn(h)));
+
+  container.appendChild(posSection);
+  container.appendChild(horsesSection);
+}
+
+function buildResultPosRow(pos) {
+  const horseId = resultAssignments[pos];
+  const horse = horseId ? state.horses.find(h => h.id === horseId) : null;
+  const row = document.createElement('div');
+  row.className = 'numpad-pos-row' + (pos === activeResultPos ? ' active' : '') + (horse ? ' filled' : '');
+  row.id = `result-posrow-${pos}`;
+  row.innerHTML = `
+    <span class="numpad-pos-label">${ORDINALS[pos - 1]}</span>
+    <span class="numpad-pos-horse">${horse ? horse.name : '—'}</span>
+    ${horse ? `<button class="numpad-pos-clear" title="Wissen" onclick="clearResultPos(event,${pos})">×</button>` : ''}
+  `;
+  row.onclick = () => setActiveResultPos(pos);
+  return row;
+}
+
+function buildResultHorseBtn(horse) {
+  const assigned = Object.values(resultAssignments).includes(horse.id);
+  const btn = document.createElement('button');
+  btn.className = 'numpad-horse-btn';
+  btn.id = `result-horsebtn-${horse.id}`;
+  btn.disabled = assigned;
+  btn.innerHTML = `<span class="numpad-horse-num">${horse.id}</span><span class="numpad-horse-name">${horse.name}</span>`;
+  btn.onclick = () => selectResultHorse(horse.id);
+  return btn;
+}
+
+function setActiveResultPos(pos) {
+  activeResultPos = pos;
+  updateResultNumpadUI();
+}
+
+function clearResultPos(event, pos) {
+  event.stopPropagation();
+  delete resultAssignments[pos];
+  activeResultPos = pos;
+  updateResultNumpadUI();
+}
+
+function selectResultHorse(horseId) {
+  resultAssignments[activeResultPos] = horseId;
+  // Advance to next unfilled position
+  let next = activeResultPos + 1;
+  while (next <= 8 && resultAssignments[next]) next++;
+  if (next <= 8) activeResultPos = next;
+  updateResultNumpadUI();
+}
+
+function updateResultNumpadUI() {
   for (let pos = 1; pos <= 8; pos++) {
-    const row = document.createElement('div');
-    row.className = 'result-row';
-    const posEl = document.createElement('div');
-    posEl.className = 'result-pos';
-    posEl.textContent = pos;
-    const select = document.createElement('select');
-    select.id = `result-pos-${pos}`;
-    select.innerHTML = '<option value="">-- Kies paard --</option>';
-    state.horses.forEach(h => {
-      const opt = document.createElement('option');
-      opt.value = h.id;
-      opt.textContent = h.name;
-      select.appendChild(opt);
-    });
-    row.appendChild(posEl);
-    row.appendChild(select);
-    container.appendChild(row);
+    const row = document.getElementById(`result-posrow-${pos}`);
+    if (!row) continue;
+    const horseId = resultAssignments[pos];
+    const horse = horseId ? state.horses.find(h => h.id === horseId) : null;
+    row.className = 'numpad-pos-row' + (pos === activeResultPos ? ' active' : '') + (horse ? ' filled' : '');
+    row.innerHTML = `
+      <span class="numpad-pos-label">${ORDINALS[pos - 1]}</span>
+      <span class="numpad-pos-horse">${horse ? horse.name : '—'}</span>
+      ${horse ? `<button class="numpad-pos-clear" title="Wissen" onclick="clearResultPos(event,${pos})">×</button>` : ''}
+    `;
+    row.onclick = () => setActiveResultPos(pos);
   }
+  state.horses.forEach(h => {
+    const btn = document.getElementById(`result-horsebtn-${h.id}`);
+    if (btn) btn.disabled = Object.values(resultAssignments).includes(h.id);
+  });
 }
 
 async function submitResults() {
-  const positions = [];
   for (let pos = 1; pos <= 8; pos++) {
-    const sel = document.getElementById(`result-pos-${pos}`);
-    if (!sel.value) { alert(`Vul positie ${pos} in.`); return; }
-    positions.push({ position: pos, horse_id: parseInt(sel.value) });
+    if (!resultAssignments[pos]) { alert(`Vul positie ${pos} in.`); return; }
   }
-  const ids = positions.map(p => p.horse_id);
-  if (new Set(ids).size !== 8) { alert('Elk paard mag maar één keer voorkomen.'); return; }
-
+  const positions = Object.entries(resultAssignments).map(([pos, horseId]) => ({
+    position: parseInt(pos), horse_id: horseId,
+  }));
   try {
     const result = await api(`/api/races/${state.activeRace.id}/results`, 'POST', { positions });
     document.getElementById('results-race-nr').textContent = state.activeRace.id;
@@ -1083,6 +1235,36 @@ async function saveAllOdds() {
     msgEl.className = 'form-msg err';
   }
 }
+
+/* ── Keyboard shortcuts for numpad entry ──────────────────────────────────── */
+document.addEventListener('keydown', e => {
+  // Only handle digit keys 1-8, ignore when focus is on an input/button
+  if (e.altKey || e.ctrlKey || e.metaKey) return;
+  const tag = document.activeElement?.tagName;
+  if (tag === 'INPUT' || tag === 'TEXTAREA' || tag === 'SELECT') return;
+
+  const num = parseInt(e.key);
+  if (isNaN(num) || num < 1 || num > 8) return;
+
+  // Race results entry active?
+  const resultsEntry = document.getElementById('results-entry-view');
+  if (resultsEntry && !resultsEntry.classList.contains('hidden')) {
+    const btn = document.getElementById(`result-horsebtn-${num}`);
+    if (btn && !btn.disabled) selectResultHorse(num);
+    return;
+  }
+
+  // Eindklassement numpad active (combined bet step)?
+  const ekSection = document.getElementById('combined-ek-section');
+  const combinedStep = document.getElementById('bet-step-combined');
+  if (
+    ekSection && !ekSection.classList.contains('hidden') &&
+    combinedStep && !combinedStep.classList.contains('hidden')
+  ) {
+    const btn = document.getElementById(`ek-horsebtn-${num}`);
+    if (btn && !btn.disabled) selectEkHorse(num);
+  }
+});
 
 /* ── Init ─────────────────────────────────────────────────────────────────── */
 showSection('section-home');

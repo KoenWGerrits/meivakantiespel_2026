@@ -70,41 +70,37 @@
         </button>
       </div>
     </div>
-    <div id="bet-step-player" class="step-panel hidden">
-      <h3>Kies speler</h3>
-      <div id="player-list" class="player-grid"></div>
-      <button class="btn-back-step" onclick="betGoToStep('type')">← Terug</button>
-    </div>
-    <div id="bet-step-horses" class="step-panel hidden">
-      <h3 id="horse-step-title">Kies paard</h3>
-      <div id="horse-grid" class="horse-grid"></div>
-      <div id="double-horse2-section" class="hidden">
-        <h3>Kies tweede paard</h3>
-        <div id="horse-grid-2" class="horse-grid"></div>
-      </div>
-      <button class="btn-back-step" onclick="betGoToStep('player')">← Terug</button>
-    </div>
-    <div id="bet-step-eindklassement" class="step-panel hidden">
-      <h3>Voorspel de eindstand (positie 1 = beste)</h3>
-      <div id="ek-standings-info" class="ek-standings-bar hidden"></div>
-      <div id="ek-grid" class="results-grid"></div>
-      <div id="ek-error" class="form-msg err" style="min-height:0"></div>
-      <button class="btn-submit" onclick="submitEindklassementPredictions()">Bevestigen</button>
-      <button class="btn-back-step" onclick="betGoToStep('player')">← Terug</button>
-    </div>
+    <div id="bet-step-combined" class="step-panel hidden">
+      <h3 class="combined-section-heading">Kies speler</h3>
+      <div id="combined-player-list" class="player-grid"></div>
 
-    <div id="bet-step-amount" class="step-panel hidden">
-      <h3>Kies inzet bedrag</h3>
-      <div id="bet-summary-preview" class="bet-preview"></div>
-      <div class="amount-section">
-        <div id="amount-buttons" class="amount-grid"></div>
-        <div class="amount-custom">
-          <input type="number" id="amount-input" min="1" step="1" placeholder="Of typ een bedrag...">
+      <div id="combined-horses-section" class="hidden">
+        <h3 id="combined-horse-title" class="combined-section-heading">Kies paard</h3>
+        <div id="combined-horse-grid" class="horse-grid"></div>
+        <div id="combined-horse2-section" class="hidden">
+          <h3 class="combined-section-heading">Kies tweede paard</h3>
+          <div id="combined-horse-grid-2" class="horse-grid"></div>
         </div>
-        <p id="amount-cap-info" class="cap-info"></p>
       </div>
+
+      <div id="combined-ek-section" class="hidden">
+        <h3 class="combined-section-heading">Voorspel de eindstand (positie 1 = beste)</h3>
+        <div id="combined-ek-standings-info" class="ek-standings-bar hidden"></div>
+        <div id="combined-ek-grid" class="results-grid"></div>
+        <div id="combined-ek-error" class="form-msg err" style="min-height:0"></div>
+      </div>
+
+      <h3 class="combined-section-heading">Kies inzet bedrag</h3>
+      <div class="amount-section">
+        <div id="combined-amount-buttons" class="amount-grid"></div>
+        <div class="amount-custom">
+          <input type="number" id="combined-amount-input" min="1" step="1" placeholder="Of typ een bedrag...">
+        </div>
+        <p id="combined-amount-cap-info" class="cap-info"></p>
+      </div>
+
       <button class="btn-submit" onclick="submitBet()">Bet Plaatsen</button>
-      <button class="btn-back-step" onclick="betGoToStep('horses')">← Terug</button>
+      <button class="btn-back-step" onclick="betGoToStep('type')">← Terug</button>
     </div>
     <div id="bet-step-success" class="step-panel hidden">
       <div class="success-box">
@@ -143,7 +139,7 @@
         <button class="btn-back-step" onclick="showResultatenHistory()">← Terug naar overzicht</button>
         <div id="results-race-info" class="race-badge"></div>
       </div>
-      <p class="results-hint">Vul per positie in welk paard er gefinisht is.</p>
+      <p class="results-hint">Klik een paard om het toe te wijzen aan de actieve positie. Gebruik de toetsen 1–8 op het toetsenbord. Klik een positie om die te selecteren.</p>
       <div id="results-positions" class="results-grid"></div>
       <button class="btn-submit" onclick="submitResults()">Resultaten Opslaan</button>
     </div>

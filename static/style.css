@@ -77,6 +77,14 @@ body {
 .step-panel h3 { font-size: 1rem; color: var(--text-dim); margin-bottom: 14px; }
 .hidden { display: none !important; }
 
+/* ── Combined bet step section headings ───────────────────────────────────── */
+.combined-section-heading {
+  font-size: 1rem; color: var(--text-dim);
+  margin-top: 24px; margin-bottom: 14px;
+  padding-top: 20px; border-top: 1px solid var(--border);
+}
+.combined-section-heading:first-child { margin-top: 0; padding-top: 0; border-top: none; }
+
 /* ── Bet type buttons ─────────────────────────────────────────────────────── */
 .btn-group-vert { display: flex; flex-direction: column; gap: 12px; }
 
@@ -212,6 +220,65 @@ body {
   border-radius: 6px; padding: 8px 10px; color: var(--text); font-size: 0.9rem;
 }
 .result-row select:focus { outline: none; border-color: var(--accent); }
+
+/* ── Numpad entry (race results & eindklassement) ─────────────────────────── */
+.numpad-layout { display: flex; flex-direction: column; gap: 16px; margin-bottom: 20px; }
+
+.numpad-positions { display: flex; flex-direction: column; gap: 6px; }
+
+.numpad-pos-row {
+  display: flex; align-items: center; gap: 12px;
+  padding: 10px 14px;
+  background: var(--surface2); border: 2px solid var(--border);
+  border-radius: var(--radius-sm); cursor: pointer;
+  transition: border-color .12s, background .12s;
+}
+.numpad-pos-row:hover { border-color: var(--text-dim); }
+.numpad-pos-row.active { border-color: var(--accent); background: #1e2a42; }
+.numpad-pos-row.filled { border-color: var(--green); }
+.numpad-pos-row.active.filled { border-color: var(--accent); background: #1e2a42; }
+
+.numpad-pos-label {
+  width: 36px; font-weight: 700; font-size: 0.9rem;
+  color: var(--text-dim); flex-shrink: 0;
+}
+.numpad-pos-row.active .numpad-pos-label { color: var(--accent); }
+
+.numpad-pos-horse { font-size: 0.9rem; color: var(--text-dim); flex: 1; }
+.numpad-pos-row.filled .numpad-pos-horse { color: var(--text); font-weight: 600; }
+
+.numpad-pos-clear {
+  background: none; border: none; color: var(--text-dim);
+  font-size: 0.75rem; cursor: pointer; padding: 2px 4px; line-height: 1;
+  opacity: 0; transition: opacity .12s;
+}
+.numpad-pos-row.filled:hover .numpad-pos-clear,
+.numpad-pos-row.active.filled .numpad-pos-clear { opacity: 1; }
+.numpad-pos-clear:hover { color: var(--red); }
+
+.numpad-horses {
+  display: grid; grid-template-columns: repeat(2, 1fr); gap: 8px;
+}
+
+.numpad-horse-btn {
+  display: flex; align-items: center; gap: 10px;
+  padding: 13px 12px;
+  background: var(--surface2); border: 2px solid var(--border);
+  border-radius: var(--radius-sm); cursor: pointer; color: var(--text);
+  transition: border-color .12s, opacity .12s; text-align: left;
+}
+.numpad-horse-btn:hover:not(:disabled) { border-color: var(--accent); }
+.numpad-horse-btn:disabled { opacity: .32; cursor: not-allowed; }
+
+.numpad-horse-num {
+  width: 28px; height: 28px; background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: 6px; display: flex; align-items: center; justify-content: center;
+  font-weight: 700; font-size: 0.9rem; flex-shrink: 0; color: var(--text-dim);
+}
+.numpad-horse-btn:not(:disabled) .numpad-horse-num { color: var(--text); }
+
+.numpad-horse-name { font-size: 0.85rem; line-height: 1.2; }
 
 .btn-danger {
   padding: 12px 16px; margin-top: 16px;
