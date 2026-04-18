@@ -23,14 +23,15 @@ function showSection(id) {
   document.querySelectorAll('.section').forEach(s => s.classList.remove('active'));
   document.getElementById(id).classList.add('active');
   const loaders = {
-    'section-home':       loadHome,
-    'section-nieuwe-bet': loadNieuweBet,
-    'section-resultaten': loadResultaten,
-    'section-bets':       loadBets,
-    'section-balans':     loadBalans,
-    'section-overzicht':  loadOverzicht,
-    'section-spelers':    loadSpelers,
-    'section-odds':       loadOdds,
+    'section-home':            loadHome,
+    'section-nieuwe-bet':      loadNieuweBet,
+    'section-resultaten':      loadResultaten,
+    'section-bets':            loadBets,
+    'section-balans':          loadBalans,
+    'section-overzicht':       loadOverzicht,
+    'section-spelers':         loadSpelers,
+    'section-odds':            loadOdds,
+    'section-eindklassement':  loadEindklassement,
   };
   if (loaders[id]) loaders[id]();
 }
@@ -108,22 +109,22 @@ async function renderCombinedStep() {
   const isEk = type === 'eindklassement';
   const isDouble = type === 'double';
 
-  // Show/hide horse vs EK sections
+  document.getElementById('bet-3col').classList.toggle('ek-mode', isEk);
+  document.getElementById('combined-amount-col').classList.toggle('hidden', isEk);
   document.getElementById('combined-horses-section').classList.toggle('hidden', isEk);
   document.getElementById('combined-ek-section').classList.toggle('hidden', !isEk);
 
   if (!isEk) {
-    document.getElementById('combined-horse-title').textContent = isDouble ? 'Kies eerste paard' : 'Kies paard';
-    document.getElementById('combined-horse2-section').classList.toggle('hidden', !isDouble);
-    renderCombinedHorseGrid('combined-horse-grid', 1);
-    if (isDouble) renderCombinedHorseGrid('combined-horse-grid-2', 2);
+    document.getElementById('combined-horse-title').textContent =
+      isDouble ? 'Paarden (kies 2)' : 'Paard';
+    renderCombinedHorseGrid();
+    renderCombinedAmountSection();
   } else {
     await renderCombinedEkStandings();
     renderCombinedEkGrid();
   }
 
   await renderCombinedPlayerList();
-  renderCombinedAmountSection();
 }
 
 async function renderCombinedPlayerList() {
@@ -190,10 +191,8 @@ async function renderCombinedPlayerList() {
               predicted_position: pr.predicted_position,
             }));
           } catch { state.bet.predictions = null; }
-          state.bet.amount = ekBet.amount;
           state.bet.editBetId = ekBet.bet_id;
           renderCombinedEkGrid();
-          renderCombinedAmountSection();
         } else {
           state.bet.predictions = null;
           state.bet.editBetId = null;
@@ -206,22 +205,41 @@ async function renderCombinedPlayerList() {
   }
 }
 
-function renderCombinedHorseGrid(containerId, slot) {
-  const container = document.getElementById(containerId);
+function renderCombinedHorseGrid() {
+  const container = document.getElementById('combined-horse-grid');
   container.innerHTML = '';
+  const isDouble = state.bet.type === 'double';
+
   state.horses.forEach(h => {
+    const isH1 = state.bet.horse1 && state.bet.horse1.id === h.id;
+    const isH2 = state.bet.horse2 && state.bet.horse2.id === h.id;
     const btn = document.createElement('button');
-    btn.className = 'horse-btn';
-    const other = slot === 1 ? state.bet.horse2 : state.bet.horse1;
-    const current = slot === 1 ? state.bet.horse1 : state.bet.horse2;
-    if (other && other.id === h.id) btn.disabled = true;
-    if (current && current.id === h.id) btn.classList.add('selected');
-    btn.innerHTML = `${h.name}<span class="odds-tag">odds: ${h.odds}</span>`;
+    btn.className = 'horse-btn' + (isH1 || isH2 ? ' selected' : '');
+
+    let nameHtml = h.name;
+    if (isDouble && isH1) nameHtml += ' <span class="horse-sel-badge">1</span>';
+    if (isDouble && isH2) nameHtml += ' <span class="horse-sel-badge">2</span>';
+    btn.innerHTML = `${nameHtml}<span class="odds-tag">odds: ${h.odds}</span>`;
+
     btn.onclick = () => {
-      if (slot === 1) state.bet.horse1 = h;
-      else state.bet.horse2 = h;
-      renderCombinedHorseGrid('combined-horse-grid', 1);
-      if (state.bet.type === 'double') renderCombinedHorseGrid('combined-horse-grid-2', 2);
+      if (!isDouble) {
+        state.bet.horse1 = h;
+      } else {
+        if (isH1) {
+          state.bet.horse1 = state.bet.horse2 || null;
+          state.bet.horse2 = null;
+        } else if (isH2) {
+          state.bet.horse2 = null;
+        } else if (!state.bet.horse1) {
+          state.bet.horse1 = h;
+        } else if (!state.bet.horse2) {
+          state.bet.horse2 = h;
+        } else {
+          state.bet.horse1 = state.bet.horse2;
+          state.bet.horse2 = h;
+        }
+      }
+      renderCombinedHorseGrid();
     };
     container.appendChild(btn);
   });
@@ -381,16 +399,17 @@ function renderCombinedAmountSection() {
 async function submitBet() {
   if (!state.bet.player) { alert('Kies een speler.'); return; }
 
+  const isEk = state.bet.type === 'eindklassement';
   const amountInput = document.getElementById('combined-amount-input');
-  const amount = state.bet.amount || parseFloat(amountInput?.value);
-  if (!amount || amount <= 0) { alert('Vul een geldig bedrag in.'); return; }
+  const amount = isEk ? 0 : (state.bet.amount || parseFloat(amountInput?.value));
+  if (!isEk && (!amount || amount <= 0)) { alert('Vul een geldig bedrag in.'); return; }
 
   // For single/double: validate horse selection
   if (state.bet.type === 'single' && !state.bet.horse1) { alert('Kies een paard.'); return; }
   if (state.bet.type === 'double' && (!state.bet.horse1 || !state.bet.horse2)) { alert('Kies twee paarden.'); return; }
 
   // For eindklassement: collect predictions from numpad state
-  if (state.bet.type === 'eindklassement') {
+  if (isEk) {
     const errEl = document.getElementById('combined-ek-error');
     errEl.textContent = '';
     for (let pos = 1; pos <= 8; pos++) {
@@ -403,11 +422,11 @@ async function submitBet() {
 
   try {
     if (state.bet.editBetId) {
-      // Edit mode: update predictions and amount separately
+      // Edit mode: update predictions (and amount for non-EK)
       await api(`/api/bets/${state.bet.editBetId}/predictions`, 'PUT', {
         predictions: state.bet.predictions,
       });
-      await api(`/api/bets/${state.bet.editBetId}`, 'PUT', { amount });
+      if (!isEk) await api(`/api/bets/${state.bet.editBetId}`, 'PUT', { amount });
     } else {
       const body = {
         player_id: state.bet.player.id,
@@ -416,19 +435,19 @@ async function submitBet() {
         horse2_id: state.bet.horse2 ? state.bet.horse2.id : null,
         amount,
       };
-      if (state.bet.type === 'eindklassement') body.predictions = state.bet.predictions;
+      if (isEk) body.predictions = state.bet.predictions;
       await api(`/api/races/${state.activeRace.id}/bets`, 'POST', body);
     }
     const typeLabel = { single: 'Single', double: 'Double', eindklassement: 'Eindklassement' };
     let horsesText;
-    if (state.bet.type === 'eindklassement') {
+    if (isEk) {
       horsesText = state.bet.editBetId ? 'Top-8 voorspelling bijgewerkt' : 'Top-8 voorspelling';
     } else {
       horsesText = state.bet.horse1 ? state.bet.horse1.name : '';
       if (state.bet.horse2) horsesText += ` + ${state.bet.horse2.name}`;
     }
     document.getElementById('bet-success-detail').innerHTML =
-      `${state.bet.player.name} · ${typeLabel[state.bet.type]}<br>${horsesText} · €${amount}`;
+      `${state.bet.player.name} · ${typeLabel[state.bet.type]}<br>${horsesText}${!isEk ? ' · €' + amount : ''}`;
     betGoToStep('success');
   } catch (err) { alert(`Fout: ${err.message}`); }
 }
@@ -661,7 +680,7 @@ async function renderPayoutSummary(payouts) {
     const name = p ? `${p.name} (${p.family_name})` : `Speler ${pid}`;
     row.innerHTML = `
       <span>${name}</span>
-      <span class="payout-amount ${total > 0 ? '' : 'zero'}">€${total.toFixed(2)}</span>
+      <span class="payout-amount ${total > 0 ? '' : 'zero'}">€${Math.ceil(total)}</span>
     `;
     container.appendChild(row);
   });
@@ -923,7 +942,11 @@ async function renderBalans() {
     return;
   }
 
-  for (const family of Object.keys(byFamily).sort()) {
+  const families = Object.keys(byFamily).sort();
+  // Fix column count explicitly so opening a detail never reshapes the grid
+  container.style.gridTemplateColumns = `repeat(${families.length}, minmax(0, 1fr))`;
+
+  for (const family of families) {
     const block = document.createElement('div');
     block.className = 'family-block';
     block.innerHTML = `<h4>${family}</h4>`;
@@ -935,18 +958,12 @@ async function renderBalans() {
       row.innerHTML = `
         <span class="balans-name">${p.player_name}</span>
         <span class="balans-right">
-          <span class="balans-total ${p.total > 0 ? 'positive' : 'zero'}">€${p.total.toFixed(2)}</span>
+          <span class="balans-total ${p.total > 0 ? 'positive' : 'zero'}">€${Math.ceil(p.total)}</span>
           <span class="balans-chevron" id="chevron-${p.player_id}">▼</span>
         </span>
       `;
       row.onclick = () => togglePlayerDetail(p.player_id);
       block.appendChild(row);
-
-      const detail = document.createElement('div');
-      detail.className = 'player-detail hidden';
-      detail.id = `detail-${p.player_id}`;
-      detail.innerHTML = '<p class="detail-loading">Laden...</p>';
-      block.appendChild(detail);
     });
 
     container.appendChild(block);
@@ -954,24 +971,24 @@ async function renderBalans() {
 }
 
 async function togglePlayerDetail(playerId) {
-  const detail = document.getElementById(`detail-${playerId}`);
+  const panel = document.getElementById('balans-detail-panel');
   const chevron = document.getElementById(`chevron-${playerId}`);
-  const isOpen = !detail.classList.contains('hidden');
+  const isOpen = openBalansPlayer === playerId;
 
-  document.querySelectorAll('.player-detail').forEach(d => d.classList.add('hidden'));
-  document.querySelectorAll('.balans-chevron').forEach(c => c.textContent = '▼');
-  document.querySelectorAll('.balans-row').forEach(r => r.classList.remove('balans-row-open'));
+  document.querySelectorAll('#balans-list .balans-chevron').forEach(c => c.textContent = '▼');
+  document.querySelectorAll('#balans-list .balans-row').forEach(r => r.classList.remove('balans-row-open'));
+  panel.classList.add('hidden');
+  panel.innerHTML = '';
+  openBalansPlayer = null;
 
-  if (isOpen) { openBalansPlayer = null; return; }
+  if (isOpen) return;
 
   openBalansPlayer = playerId;
-  detail.classList.remove('hidden');
   chevron.textContent = '▲';
   document.getElementById(`balans-row-${playerId}`).classList.add('balans-row-open');
-
-  if (detail.querySelector('.detail-loading')) {
-    await loadPlayerDetail(playerId, detail);
-  }
+  panel.innerHTML = '<p class="detail-loading">Laden...</p>';
+  panel.classList.remove('hidden');
+  await loadPlayerDetail(playerId, panel);
 }
 
 async function loadPlayerDetail(playerId, container) {
@@ -1031,10 +1048,10 @@ async function loadPlayerDetail(playerId, container) {
         <td class="detail-inzet">€${b.amount.toFixed(2)}</td>
         <td class="detail-formula">${pending ? '(lopend)' : b.formula}</td>
         <td class="detail-payout ${b.payout > 0 ? 'win' : 'lose'}">
-          ${pending ? '—' : '€' + b.payout.toFixed(2)}
+          ${pending ? '—' : '€' + Math.ceil(b.payout)}
         </td>
         <td class="detail-paid-out ${b.paid_out > 0 ? 'paid' : 'unpaid'}">
-          ${b.paid_out > 0 ? '€' + b.paid_out.toFixed(2) : '—'}
+          ${b.paid_out > 0 ? '€' + Math.ceil(b.paid_out) : '—'}
         </td>
       `;
       tbody.appendChild(tr);
@@ -1046,7 +1063,7 @@ async function loadPlayerDetail(playerId, container) {
 
     const totalRow = document.createElement('div');
     totalRow.className = 'detail-total-row';
-    totalRow.innerHTML = `<span>Totaal</span><span class="detail-total-amount">€${data.total.toFixed(2)}</span>`;
+    totalRow.innerHTML = `<span>Totaal</span><span class="detail-total-amount">€${Math.ceil(data.total)}</span>`;
     container.appendChild(totalRow);
   } catch (err) {
     container.innerHTML = `<p class="detail-error">${err.message}</p>`;
@@ -1097,7 +1114,7 @@ async function loadOverzicht() {
         </div>
         <div class="overzicht-stat">
           <span class="stat-label">Totaal uitbetaald</span>
-          <span class="stat-value ${r.total_payout > 0 ? 'stat-win' : ''}">€${r.total_payout.toFixed(2)}</span>
+          <span class="stat-value ${r.total_payout > 0 ? 'stat-win' : ''}">€${Math.ceil(r.total_payout)}</span>
         </div>
       </div>
       <button class="btn-danger overzicht-reset-btn" onclick="confirmResetRaceFromOverzicht(${r.id})">
@@ -1199,6 +1216,148 @@ async function createPlayer() {
     msgEl.textContent = `Fout: ${err.message}`;
     msgEl.className = 'form-msg err';
   }
+}
+
+/* ── Eindklassement tab ───────────────────────────────────────────────────── */
+let openEkPlayer = null;
+
+async function loadEindklassement() {
+  openEkPlayer = null;
+  const noteEl = document.getElementById('ek-scores-pending-note');
+  const container = document.getElementById('ek-scores-list');
+  container.innerHTML = '<p class="detail-loading">Laden...</p>';
+  noteEl.classList.add('hidden');
+
+  let data;
+  try {
+    data = await api('/api/eindklassement/scores');
+  } catch (err) {
+    container.innerHTML = `<p class="detail-error">${err.message}</p>`;
+    return;
+  }
+
+  if (!data.race5_finished) {
+    noteEl.textContent = 'Race 5 is nog niet afgerond. Uitbetalingen worden berekend na afloop van alle races.';
+    noteEl.classList.remove('hidden');
+  }
+
+  container.innerHTML = '';
+
+  if (data.players.length === 0) {
+    container.innerHTML = '<p class="info-msg">Geen eindklassement bets gevonden.</p>';
+    return;
+  }
+
+  const byFamily = {};
+  data.players.forEach(p => {
+    if (!byFamily[p.family_name]) byFamily[p.family_name] = [];
+    byFamily[p.family_name].push(p);
+  });
+
+  for (const family of Object.keys(byFamily).sort()) {
+    const block = document.createElement('div');
+    block.className = 'family-block';
+    block.innerHTML = `<h4>${family}</h4>`;
+
+    byFamily[family].forEach(p => {
+      const payoutText = p.payout !== null ? `€${Math.ceil(p.payout)}` : '—';
+      const payoutClass = p.payout > 0 ? 'positive' : 'zero';
+
+      const row = document.createElement('div');
+      row.className = 'balans-row';
+      row.id = `ek-row-${p.player_id}`;
+      row.innerHTML = `
+        <span class="balans-name">${p.player_name}
+          <span class="ek-multiplier-tag">×${p.multiplier}</span>
+        </span>
+        <span class="balans-right">
+          <span class="balans-total ${payoutClass}">${payoutText}</span>
+          <span class="balans-chevron" id="ek-chevron-${p.player_id}">▼</span>
+        </span>
+      `;
+      row.onclick = () => toggleEkPlayerDetail(p.player_id);
+      block.appendChild(row);
+
+      const detail = document.createElement('div');
+      detail.className = 'player-detail hidden';
+      detail.id = `ek-detail-${p.player_id}`;
+      renderEkPlayerDetail(detail, p, data.race5_finished);
+      block.appendChild(detail);
+    });
+
+    container.appendChild(block);
+  }
+}
+
+function toggleEkPlayerDetail(playerId) {
+  const detail = document.getElementById(`ek-detail-${playerId}`);
+  const chevron = document.getElementById(`ek-chevron-${playerId}`);
+  const isOpen = !detail.classList.contains('hidden');
+
+  document.querySelectorAll('#ek-scores-list .player-detail').forEach(d => d.classList.add('hidden'));
+  document.querySelectorAll('#ek-scores-list .balans-chevron').forEach(c => c.textContent = '▼');
+  document.querySelectorAll('#ek-scores-list .balans-row').forEach(r => r.classList.remove('balans-row-open'));
+
+  if (isOpen) { openEkPlayer = null; return; }
+
+  openEkPlayer = playerId;
+  detail.classList.remove('hidden');
+  chevron.textContent = '▲';
+  document.getElementById(`ek-row-${playerId}`).classList.add('balans-row-open');
+}
+
+function renderEkPlayerDetail(container, playerData, race5Finished) {
+  const wrapper = document.createElement('div');
+  wrapper.className = 'detail-table-wrap';
+
+  const table = document.createElement('table');
+  table.className = 'detail-table';
+
+  const headerCols = race5Finished
+    ? '<th>Voorspeld</th><th>Paard</th><th>Werkelijk</th><th style="text-align:right">Score</th>'
+    : '<th>Voorspeld</th><th>Paard</th><th>Werkelijk</th>';
+  table.innerHTML = `<thead><tr>${headerCols}</tr></thead>`;
+
+  const tbody = document.createElement('tbody');
+  playerData.horses.forEach(h => {
+    const tr = document.createElement('tr');
+    const actualPos = h.actual_position !== null ? `${h.actual_position}e` : '—';
+    if (race5Finished) {
+      const scoreClass = h.score === 0 ? 'lose' : 'win';
+      tr.innerHTML = `
+        <td>${h.predicted_position}e</td>
+        <td>${h.horse_name}</td>
+        <td>${actualPos}</td>
+        <td class="detail-payout ${scoreClass}">${h.score}</td>
+      `;
+    } else {
+      tr.innerHTML = `
+        <td>${h.predicted_position}e</td>
+        <td>${h.horse_name}</td>
+        <td>—</td>
+      `;
+    }
+    tbody.appendChild(tr);
+  });
+
+  table.appendChild(tbody);
+  wrapper.appendChild(table);
+  container.appendChild(wrapper);
+
+  const footerRow = document.createElement('div');
+  footerRow.className = 'detail-total-row';
+  if (race5Finished) {
+    footerRow.innerHTML = `
+      <span>${playerData.total_score}pt × ${playerData.multiplier}</span>
+      <span class="detail-total-amount">€${Math.ceil(playerData.payout)}</span>
+    `;
+  } else {
+    footerRow.innerHTML = `
+      <span style="color:var(--text-dim)">Multiplier</span>
+      <span style="color:var(--text-dim)">×${playerData.multiplier}</span>
+    `;
+  }
+  container.appendChild(footerRow);
 }
 
 /* ── Odds ─────────────────────────────────────────────────────────────────── */

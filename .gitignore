@@ -34,3 +34,7 @@ CLAUDE.md
 
 # Logs
 *.log
+
+# Overige bestanden
+Paarden_en_ruiters_info.docs
+paardenrace_modifiers.xlsx

@@ -1,9 +1,11 @@
+import math
 from flask import Flask, jsonify, request, render_template
 from database import get_db, init_db
 from payout import (
     calculate_race_payouts,
     calculate_eindklassement_payouts,
     eindklassement_horse_score,
+    new_eindklassement_horse_score,
     round_multiplier,
     compute_final_standings,
     compute_standings_with_details,
@@ -198,6 +200,84 @@ def get_eindklassement_standings():
         conn.close()
 
 
+@app.route('/api/eindklassement/scores')
+def get_eindklassement_scores():
+    conn = get_db()
+    try:
+        race5 = conn.execute("SELECT status FROM races WHERE id = 5").fetchone()
+        race5_finished = bool(race5 and race5['status'] == 'finished')
+
+        final_standings = {}
+        if race5_finished:
+            final_standings = compute_final_standings(conn)
+
+        standings_details = compute_standings_with_details(conn)
+
+        bets = conn.execute('''
+            SELECT b.id AS bet_id, b.player_id, b.race_id, b.amount,
+                   p.name AS player_name, f.name AS family_name
+            FROM bets b
+            JOIN players p ON b.player_id = p.id
+            JOIN families f ON p.family_id = f.id
+            WHERE b.bet_type = 'eindklassement'
+            ORDER BY f.name, p.name
+        ''').fetchall()
+
+        players_data = []
+        for bet in bets:
+            preds = conn.execute('''
+                SELECT ep.predicted_position, ep.horse_id, h.name AS horse_name
+                FROM eindklassement_predictions ep
+                JOIN horses h ON ep.horse_id = h.id
+                WHERE ep.bet_id = ?
+                ORDER BY ep.predicted_position
+            ''', (bet['bet_id'],)).fetchall()
+
+            multiplier = round_multiplier(bet['race_id'])
+            horses_data = []
+            total_score = 0
+            for pred in preds:
+                if race5_finished:
+                    actual_pos = final_standings.get(pred['horse_id'], 9)
+                    score = new_eindklassement_horse_score(
+                        pred['predicted_position'], actual_pos
+                    )
+                    total_score += score
+                else:
+                    actual_pos = None
+                    score = None
+
+                horses_data.append({
+                    'predicted_position': pred['predicted_position'],
+                    'horse_id': pred['horse_id'],
+                    'horse_name': pred['horse_name'],
+                    'actual_position': actual_pos,
+                    'score': score,
+                })
+
+            payout = math.ceil(total_score * multiplier) if race5_finished else None
+            players_data.append({
+                'player_id': bet['player_id'],
+                'player_name': bet['player_name'],
+                'family_name': bet['family_name'],
+                'bet_id': bet['bet_id'],
+                'race_id': bet['race_id'],
+                'amount': bet['amount'],
+                'multiplier': multiplier,
+                'total_score': total_score if race5_finished else None,
+                'payout': payout,
+                'horses': horses_data,
+            })
+
+        return jsonify({
+            'race5_finished': race5_finished,
+            'final_standings': standings_details,
+            'players': players_data,
+        })
+    finally:
+        conn.close()
+
+
 @app.route('/api/bets/<int:bet_id>/predictions')
 def get_bet_predictions(bet_id):
     conn = get_db()
@@ -278,12 +358,13 @@ def create_bet(race_id):
             return jsonify({'error': 'Speler is verplicht'}), 400
         if bet_type not in ('single', 'double', 'eindklassement'):
             return jsonify({'error': 'Ongeldig bet type'}), 400
-        if amount <= 0:
-            return jsonify({'error': 'Bedrag moet groter zijn dan 0'}), 400
 
-        cap = bet_cap_for_race(race_id)
-        if amount > cap:
-            return jsonify({'error': f'Maximaal inzet voor deze race is {cap}'}), 400
+        if bet_type != 'eindklassement':
+            if amount <= 0:
+                return jsonify({'error': 'Bedrag moet groter zijn dan 0'}), 400
+            cap = bet_cap_for_race(race_id)
+            if amount > cap:
+                return jsonify({'error': f'Maximaal inzet voor deze race is {cap}'}), 400
 
         predictions = []
         if bet_type == 'single':
@@ -518,8 +599,6 @@ def submit_results(race_id):
         conn.close()
 
     payout_records = calculate_race_payouts(race_id)
-    if is_last_race:
-        payout_records += calculate_eindklassement_payouts()
 
     return jsonify({'race_id': race_id, 'payouts': payout_records}), 201
 
@@ -586,42 +665,26 @@ def _format_formula(bet_type, amount, odds1, pos1, odds2=None, pos2=None):
     if bet_type == 'single':
         if pos1 is None:
             return '(race nog niet afgelopen)'
-        b = base(amount, odds1)
         if pos1 == 1:
-            return f"{n(amount)} × {n(odds1)} + {n(amount)} = {b:.2f}"
-        elif pos1 == 2:
-            return f"({n(amount)} × {n(odds1)} + {n(amount)}) ÷ 2 = {b/2:.2f}"
-        elif pos1 == 3:
-            return f"({n(amount)} × {n(odds1)} + {n(amount)}) ÷ 3 = {b/3:.2f}"
-        else:
-            return f"Positie {pos1} — geen uitbetaling"
+            payout = amount + amount * odds1
+            return f"{n(amount)} + {n(amount)} × {n(odds1)} = {math.ceil(payout)}"
+        return f"Positie {pos1} — geen uitbetaling"
 
     if bet_type == 'double':
         if pos1 is None or pos2 is None:
             return '(race nog niet afgelopen)'
         h1 = pos1 <= 2
         h2 = pos2 <= 2
-        if not h1 and not h2:
-            return f"Positie {pos1} en {pos2} — geen uitbetaling"
-        parts = []
-        total = 0.0
-        if h1:
-            b = base(amount, odds1)
-            if pos1 == 1:
-                parts.append(f"{n(amount)} × {n(odds1)} + {n(amount)}")
-                total += b
-            else:
-                parts.append(f"({n(amount)} × {n(odds1)} + {n(amount)}) ÷ 2")
-                total += b / 2
-        if h2:
-            b = base(amount, odds2)
-            if pos2 == 1:
-                parts.append(f"{n(amount)} × {n(odds2)} + {n(amount)}")
-                total += b
-            else:
-                parts.append(f"({n(amount)} × {n(odds2)} + {n(amount)}) ÷ 2")
-                total += b / 2
-        return ' + '.join(parts) + f" = {total:.2f}"
+        if h1 and h2:
+            payout = amount + amount * (odds1 + odds2)
+            return f"{n(amount)} + {n(amount)} × ({n(odds1)} + {n(odds2)}) = {math.ceil(payout)}"
+        elif h1:
+            payout = amount + (amount * odds1) / 2
+            return f"{n(amount)} + ({n(amount)} × {n(odds1)}) ÷ 2 = {math.ceil(payout)}"
+        elif h2:
+            payout = amount + (amount * odds2) / 2
+            return f"{n(amount)} + ({n(amount)} × {n(odds2)}) ÷ 2 = {math.ceil(payout)}"
+        return f"Positie {pos1} en {pos2} — geen uitbetaling"
 
     return ''
 
@@ -648,7 +711,7 @@ def get_balance():
                        COALESCE(SUM(COALESCE(py.amount, 0.0)), 0.0) AS total
                 FROM players p
                 JOIN families f ON p.family_id = f.id
-                LEFT JOIN bets b ON b.player_id = p.id AND b.race_id IN ({ph})
+                LEFT JOIN bets b ON b.player_id = p.id AND b.race_id IN ({ph}) AND b.bet_type != 'eindklassement'
                 LEFT JOIN payouts py ON py.bet_id = b.id
                 GROUP BY p.id
                 ORDER BY f.name, p.name
@@ -660,7 +723,7 @@ def get_balance():
                        COALESCE(SUM(CASE WHEN py.id > ? THEN py.amount ELSE 0 END), 0) AS total
                 FROM players p
                 JOIN families f ON p.family_id = f.id
-                LEFT JOIN bets b ON b.player_id = p.id
+                LEFT JOIN bets b ON b.player_id = p.id AND b.bet_type != 'eindklassement'
                 LEFT JOIN payouts py ON py.bet_id = b.id
                 GROUP BY p.id
                 ORDER BY f.name, p.name
@@ -705,7 +768,7 @@ def get_player_balance(player_id):
             LEFT JOIN race_results rr2 ON rr2.race_id = b.race_id AND rr2.horse_id = b.horse2_id
             LEFT JOIN payouts py ON py.bet_id = b.id
             LEFT JOIN races r ON b.race_id = r.id
-            WHERE b.player_id = ? {race_filter}
+            WHERE b.player_id = ? AND b.bet_type != 'eindklassement' {race_filter}
             ORDER BY b.race_id, b.id
         '''
 
@@ -746,7 +809,7 @@ def get_player_balance(player_id):
                         for p in preds
                     )
                     mult = round_multiplier(b['race_id'])
-                    entry['formula'] = f'{total_score}pts × {mult} = €{b["payout"]:.2f}'
+                    entry['formula'] = f'{total_score}pts × {mult} = €{int(b["payout"])}'
                 else:
                     entry['formula'] = '(lopend — einduitslag nog niet bekend)'
             else:

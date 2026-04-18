@@ -1,3 +1,4 @@
+import math
 from database import get_db
 
 
@@ -5,11 +6,7 @@ from database import get_db
 
 def single_payout(amount: float, odds: float, position: int) -> float:
     if position == 1:
-        return amount * odds + amount
-    elif position == 2:
-        return (amount * odds + amount) / 2
-    elif position == 3:
-        return (amount * odds + amount) / 3
+        return amount + amount * odds
     return 0.0
 
 
@@ -22,14 +19,11 @@ def double_payout(
     h2_in_top2 = horse2_position <= 2
 
     if h1_in_top2 and h2_in_top2:
-        return (
-            single_payout(amount, horse1_odds, horse1_position)
-            + single_payout(amount, horse2_odds, horse2_position)
-        )
+        return amount + amount * (horse1_odds + horse2_odds)
     elif h1_in_top2:
-        return single_payout(amount, horse1_odds, horse1_position)
+        return amount + (amount * horse1_odds) / 2
     elif h2_in_top2:
-        return single_payout(amount, horse2_odds, horse2_position)
+        return amount + (amount * horse2_odds) / 2
     return 0.0
 
 
@@ -69,14 +63,15 @@ def calculate_race_payouts(race_id: int) -> list:
             else:
                 amount_out = 0.0
 
+            amount_out = math.ceil(amount_out)
             conn.execute(
                 'INSERT INTO payouts (bet_id, amount) VALUES (?, ?)',
-                (bet['bet_id'], round(amount_out, 2))
+                (bet['bet_id'], amount_out)
             )
             payout_records.append({
                 'bet_id': bet['bet_id'],
                 'player_id': bet['player_id'],
-                'amount': round(amount_out, 2),
+                'amount': amount_out,
             })
 
         conn.commit()
@@ -156,6 +151,27 @@ def compute_standings_with_details(conn) -> list:
     ]
 
 
+def new_eindklassement_horse_score(predicted_position: int, actual_position: int) -> int:
+    """
+    New scoring formula for the Eindklassement tab:
+      exact match pos 1: 25, pos 2: 20, pos 3: 15, pos 4-8: 10
+      off by 1: 5 (regardless of position)
+      off by 2+: 0
+    """
+    diff = abs(predicted_position - actual_position)
+    if diff == 0:
+        if predicted_position == 1:
+            return 25
+        if predicted_position == 2:
+            return 20
+        if predicted_position == 3:
+            return 15
+        return 10
+    if diff == 1:
+        return 5
+    return 0
+
+
 def calculate_eindklassement_payouts() -> list:
     """
     Calculate and store payouts for all eindklassement bets.
@@ -192,7 +208,7 @@ def calculate_eindklassement_payouts() -> list:
                 for p in preds
             )
             multiplier = round_multiplier(bet['race_id'])
-            amount_out = round(total_score * multiplier, 2)
+            amount_out = math.ceil(total_score * multiplier)
 
             conn.execute(
                 'INSERT INTO payouts (bet_id, amount) VALUES (?, ?)',
